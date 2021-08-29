@@ -1,6 +1,11 @@
 const config = require('../config');
 const axios = require("axios");
 
+//little hack to handle 400 for PoC purposes https://github.com/axios/axios/issues/41#issuecomment-484546457
+axios.defaults.validateStatus = function () {
+    return true;
+};
+
 // handle the issue event coming from github webhoook
 async function handle(issuesEventPayload){
     console.log('[INFO] - synchronization handle')
@@ -60,7 +65,9 @@ async function createArtifactoryRepository(issuesEventPayload) {
     }
 
     try {
-        const response = await axios.put(url, payload, {headers: {"X-JFrog-Art-Api": config.artifactory.apiKey, "Content-Type": "application/json"}});
+        const response = await axios.put(
+            url, payload,
+            {headers: {"X-JFrog-Art-Api": config.artifactory.apiKey, "Content-Type": "application/json"}});
         return response
     }
     catch (error) {
@@ -72,6 +79,7 @@ async function internalArtifactoryGroupsHandling(issuesEventPayload) {
     console.log('[INFO] - internalArtifactoryGroupsHandling')
 
     let getGithubTeamsPerRepoResponse = await getGithubTeamsPerRepository(issuesEventPayload)
+
     let ghTeamsListPerRepo = getGithubTeamsPerRepoResponse.data
 
     for (let githubTeam of ghTeamsListPerRepo) {
@@ -79,11 +87,11 @@ async function internalArtifactoryGroupsHandling(issuesEventPayload) {
         let userNames = await createUpdateArtifactoryUsers(githubTeam, issuesEventPayload)
 
         if (getArtifactoryGroupResponse.status == 404){
-            let createArtifactoryGroupResponse = await createArtifactoryGroup(team.name, userNames)
-            const handlePermissionTargetInArtifactoryPerRepoAndGroupResponse = await handlePermissionTargetInArtifactoryPerRepoAndGroup(issuesEventPayload.repository.name, team.name, githubTeam.permissions)
+            let createArtifactoryGroupResponse = await createArtifactoryGroup(githubTeam.name, userNames)
+            const handlePermissionTargetInArtifactoryPerRepoAndGroupResponse = await handlePermissionTargetInArtifactoryPerRepoAndGroup(issuesEventPayload.repository.name, githubTeam.name, githubTeam.permissions)
         } else if (getArtifactoryGroupResponse.status == 200){
             const updateArtifactoryGroupPerRepoAndGroupResponse = await updateArtifactoryGroup(getArtifactoryGroupResponse.data, userNames)
-            const handlePermissionTargetInArtifactoryPerRepoAndGroupResponse = await handlePermissionTargetInArtifactoryPerRepoAndGroup(issuesEventPayload.repository.name, team.name, githubTeam.permissions)
+            const handlePermissionTargetInArtifactoryPerRepoAndGroupResponse = await handlePermissionTargetInArtifactoryPerRepoAndGroup(issuesEventPayload.repository.name, githubTeam.name, githubTeam.permissions)
         }
     }
 }
@@ -92,9 +100,10 @@ async function getGithubTeamsPerRepository(issuesEventPayload) {
     console.log('[INFO] - getGithubTeamsPerRepository')
     console.log('[INFO] - getGithubTeamsPerRepository - repository.name= ' + issuesEventPayload.repository.name)
 
-    const url = config.github.host + "api/" + issuesEventPayload.organization.login + '/' + issuesEventPayload.repository.name + '/teams' ;
+    const url = config.github.host + "repos/" + issuesEventPayload.organization.login + '/' + issuesEventPayload.repository.name + '/teams' ;
     try {
-      const response = await axios.get(url, { headers: { "Authorization": config.github.token }})
+      const response = await axios.get(url,
+        { headers: { "Authorization": config.github.token, "Accept": config.github.acceptHeader }})
       return response
     }
     catch (error) {
@@ -112,7 +121,10 @@ async function getArtifactoryGroupByName(name) {
     const url = config.artifactory.host + 'api/security/groups/' + name;
 
     try {
-      const response = await axios.get(url, { headers: { "Authorization": config.github.token }})
+      const response = await axios.get(
+          url,
+          {  headers: {"X-JFrog-Art-Api": config.artifactory.apiKey }}
+          )
       return response
     }
     catch (error) {
@@ -126,7 +138,7 @@ async function getArtifactoryGroupByName(name) {
 
 async function createArtifactoryGroup(groupName, userNames) {
     console.log('[INFO] - createArtifactoryGroup ')
-    const url = config.artifactory.host + "api/security/groups/" + groupName;
+    const url = config.artifactory.host + "security/groups/" + groupName;
     let membersList = [{"value": "anonymous", "display": "anonymous"}]
 
     for (let userName of userNames){
@@ -169,7 +181,7 @@ async function updateArtifactoryGroup(artifactoryGroup, userNames) {
     }
 }
 
-async function createUpdateArtifactoryUsers(githubTeam) {
+async function createUpdateArtifactoryUsers(githubTeam, issuesEventPayload) {
     console.log('[INFO] - createUpdateArtifactoryUsers')
 
     let githubTeamMembersResponse = await getGithubTeamMembers(githubTeam.name, issuesEventPayload.organization.login)
@@ -191,9 +203,12 @@ async function getGithubTeamMembers(githubTeamName, organizationName) {
     console.log('[INFO] - getGithubTeamMembers')
     console.log('[INFO] - getGithubTeamMembers - team= ' + githubTeamName)
 
-    const url = config.github.host + "orgs/" + organizationName + '/' + githubTeamName + '/members' ;
+    const url = config.github.host + "orgs/" + organizationName + '/teams/' + githubTeamName + '/members' ;
     try {
-      const response = await axios.get(url, { headers: { "Authorization": config.github.token }})
+      const response = await axios.get(
+          url,
+          { headers: { "Authorization": config.github.token, "Accept": config.github.acceptHeader }}
+        )
       return response
     }
     catch (error) {
@@ -249,18 +264,21 @@ async function handlePermissionTargetInArtifactoryPerRepoAndGroup(repositoryName
     const permissionTargetName = repositoryName + '-' + groupName + '-pt'
 
     const permissionsInArtifactory = await mapPermissionsBetweenGithubAndArtifactory(githubTeamPermissions)
+    console.log("permissionsInArtifactory " + permissionsInArtifactory)
 
     newPermissionTarget = {}
     newPermissionTarget.name = permissionTargetName
+    newPermissionTarget.repo = {}
+    newPermissionTarget.repo.actions={}
     newPermissionTarget.repo.actions.groups = {}
-    newPermissionTarget.repo.actions.groups[repositoryName] = permissionsInArtifactory
+    newPermissionTarget.repo.actions.groups[groupName] = permissionsInArtifactory
     newPermissionTarget.repo.repositories = [ repositoryName ]
 
     //the endpoints creates a new one or replace the existent one
-    const url = config.artifactory.host + 'api/v2/security/permissions/populateCaches'
+    const url = config.artifactory.host + 'v2/security/permissions/' + permissionTargetName
 
     try {
-        const response = await axios.post(url, newPermissionTarget, {headers: {"X-JFrog-Art-Api": config.artifactory.apiKey, "Content-Type": "application/json"}});
+        const response = await axios.put(url, newPermissionTarget, {headers: {"X-JFrog-Art-Api": config.artifactory.apiKey, "Content-Type": "application/json"}});
         return response
     }
     catch (error) {
@@ -269,19 +287,19 @@ async function handlePermissionTargetInArtifactoryPerRepoAndGroup(repositoryName
 }
 
 async function mapPermissionsBetweenGithubAndArtifactory(githubTeamPermissions) {
-    let githubPushMapping = ['read', 'annotate', 'write', 'delete']
-    let githubPullMapping = ['read', 'annotate']
-    let artifactoryPermissionsResultList = new Set()
+    let artifactoryPermissionsResultSet = new Set()
 
-    for (let ghPermission of githubTeamPermissions){
-        if (ghPermission == 'push') {
-            artifactoryPermissionsResultList.add(githubPushMapping)
-        } else  if (ghPermission == 'pull'){
-            artifactoryPermissionsResultList.add(githubPullMapping)
-        }
+    if (githubTeamPermissions.push) {
+        artifactoryPermissionsResultSet.add('read')
+        artifactoryPermissionsResultSet.add('annotate')
+        artifactoryPermissionsResultSet.add('write')
+        artifactoryPermissionsResultSet.add('delete')
+   } else  if (githubTeamPermissions.pull){
+        artifactoryPermissionsResultSet.add('read')
+        artifactoryPermissionsResultSet.add('annotate')
     }
 
-    return artifactoryPermissionsResultList
+    return Array.from(artifactoryPermissionsResultSet);
 }
 
 module.exports = {
