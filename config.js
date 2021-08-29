@@ -8,7 +8,7 @@ const config = {
   },
   artifactory: {
       host: 'https://nrodas.jfrog.io/artifactory/api/',
-      apiKey: env.GITHUB_TOKEN || 'testvalue',
+      apiKey: env.ARTIFACTORY_APIKEY || 'testvalue',
       authHeader: 'X-JFrog-Art-Api'
   }
 };

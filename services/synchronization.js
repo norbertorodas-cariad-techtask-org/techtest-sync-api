@@ -1,31 +1,12 @@
 const config = require('../config');
 const axios = require("axios");
-const crypto = require("crypto")
-
-
-const { WEBHOOK_SECRET } = process.env;
-
-function validateJsonWebhook(request) {
-
-    // calculate the signature
-    const expectedSignature = "sha1=" +
-        crypto.createHmac("sha1", WEBHOOK_SECRET)
-            .update(JSON.stringify(request.body))
-            .digest("hex");
-
-    // compare the signature against the one in the request
-    const signature = request.headers["x-hub-signature"];
-    if (signature !== expectedSignature) {
-        throw new Error("Invalid signature.");
-    }
-}
 
 // handle the issue event coming from github webhoook
 async function handle(issuesEventPayload){
     console.log('[INFO] - synchronization handle')
 
     if (issuesEventPayload.action == 'opened'){
-        console.log('[INFO] The issue event\'s is %s ', issuesEventPayload.action)
+        console.log('[INFO] The issue event is %s ', issuesEventPayload.action)
         let artifactoryRepoResponse = await getArtifactoryRepository(issuesEventPayload)
 
         await internalArtifactoryRepositoryHandling(issuesEventPayload, artifactoryRepoResponse)
@@ -54,7 +35,7 @@ async function getArtifactoryRepository(issuesEventPayload) {
     }
   }
 
-  async function internalArtifactoryRepositoryHandling(issuesEventPayload, artifactoryResponse) {
+async function internalArtifactoryRepositoryHandling(issuesEventPayload, artifactoryResponse) {
     console.log('[INFO] - internalArtifactoryRepositoryHandling ')
 
     if (artifactoryResponse.status != 200) {
